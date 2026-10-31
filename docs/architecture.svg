@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#334155"/>
+    </marker>
+    <style>
+      .title{font:700 28px Arial,'Microsoft YaHei';fill:#0f172a}.h{font:700 18px Arial,'Microsoft YaHei';fill:#0f172a}.t{font:15px Arial,'Microsoft YaHei';fill:#334155}.small{font:13px Arial,'Microsoft YaHei';fill:#475569}.box{stroke:#334155;stroke-width:2;rx:12}.arrow{stroke:#334155;stroke-width:2.5;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1200" height="720" fill="#f8fafc"/>
+  <text x="600" y="42" text-anchor="middle" class="title">Secure INT8 AI Accelerator Tile Architecture</text>
+
+  <rect x="55" y="80" width="310" height="105" class="box" fill="#dbeafe"/>
+  <text x="210" y="113" text-anchor="middle" class="h">Controller / CSR</text>
+  <text x="210" y="140" text-anchor="middle" class="t">IDLE → PREP → COMPUTE</text>
+  <text x="210" y="164" text-anchor="middle" class="t">→ ACTIVATE → DONE · Cycle Counter</text>
+
+  <rect x="835" y="80" width="310" height="105" class="box" fill="#fee2e2"/>
+  <text x="990" y="113" text-anchor="middle" class="h">Security Monitor (Optional)</text>
+  <text x="990" y="140" text-anchor="middle" class="t">Write Lock · Parity · Fault Code</text>
+  <text x="990" y="164" text-anchor="middle" class="t">Secure Zeroization</text>
+
+  <rect x="85" y="245" width="225" height="95" class="box" fill="#dcfce7"/>
+  <text x="197" y="278" text-anchor="middle" class="h">Activation Buffer</text>
+  <text x="197" y="308" text-anchor="middle" class="t">4 × signed INT8</text>
+  <rect x="355" y="245" width="225" height="95" class="box" fill="#fef3c7"/>
+  <text x="467" y="278" text-anchor="middle" class="h">Weight Buffer</text>
+  <text x="467" y="308" text-anchor="middle" class="t">4 × signed INT8</text>
+  <rect x="625" y="245" width="190" height="95" class="box" fill="#ede9fe"/>
+  <text x="720" y="278" text-anchor="middle" class="h">Bias Buffer</text>
+  <text x="720" y="308" text-anchor="middle" class="t">2 × signed INT32</text>
+
+  <path d="M210 185 L197 240" class="arrow"/><path d="M250 185 L450 240" class="arrow"/>
+  <path d="M950 185 L780 240" class="arrow"/>
+
+  <rect x="145" y="405" width="590" height="225" class="box" fill="#e0f2fe"/>
+  <text x="440" y="438" text-anchor="middle" class="h">2×2 Output-Stationary Systolic Array</text>
+  <g>
+    <rect x="230" y="470" width="150" height="58" class="box" fill="#ffffff"/><text x="305" y="493" text-anchor="middle" class="h">PE00</text><text x="305" y="516" text-anchor="middle" class="small">INT8 MAC → INT32</text>
+    <rect x="500" y="470" width="150" height="58" class="box" fill="#ffffff"/><text x="575" y="493" text-anchor="middle" class="h">PE01</text><text x="575" y="516" text-anchor="middle" class="small">INT8 MAC → INT32</text>
+    <rect x="230" y="550" width="150" height="58" class="box" fill="#ffffff"/><text x="305" y="573" text-anchor="middle" class="h">PE10</text><text x="305" y="596" text-anchor="middle" class="small">INT8 MAC → INT32</text>
+    <rect x="500" y="550" width="150" height="58" class="box" fill="#ffffff"/><text x="575" y="573" text-anchor="middle" class="h">PE11</text><text x="575" y="596" text-anchor="middle" class="small">INT8 MAC → INT32</text>
+    <path d="M380 499 L495 499" class="arrow"/><path d="M380 579 L495 579" class="arrow"/>
+    <path d="M305 528 L305 545" class="arrow"/><path d="M575 528 L575 545" class="arrow"/>
+  </g>
+  <path d="M197 340 L250 400" class="arrow"/><path d="M467 340 L445 400" class="arrow"/>
+
+  <rect x="805" y="405" width="310" height="225" class="box" fill="#f3e8ff"/>
+  <text x="960" y="440" text-anchor="middle" class="h">Quantized Post-Processing</text>
+  <rect x="850" y="470" width="220" height="45" class="box" fill="#ffffff"/><text x="960" y="499" text-anchor="middle" class="t">Per-channel Bias Add</text>
+  <rect x="850" y="530" width="220" height="45" class="box" fill="#ffffff"/><text x="960" y="559" text-anchor="middle" class="t">ReLU / Bypass</text>
+  <rect x="850" y="590" width="220" height="45" class="box" fill="#ffffff"/><text x="960" y="619" text-anchor="middle" class="t">Shift + INT8 Saturate</text>
+  <path d="M735 518 L800 518" class="arrow"/>
+  <path d="M960 515 L960 525" class="arrow"/><path d="M960 575 L960 585" class="arrow"/>
+  <path d="M720 340 L880 465" class="arrow"/>
+
+  <text x="840" y="675" text-anchor="middle" class="h">INT32 Debug Output</text>
+  <text x="1060" y="675" text-anchor="middle" class="h">INT8 Inference Output</text>
+  <path d="M900 635 L850 655" class="arrow"/><path d="M1020 635 L1050 655" class="arrow"/>
+</svg>

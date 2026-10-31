@@ -1,0 +1,14 @@
+read_verilog -sv rtl/mac_pe.v
+read_verilog -sv rtl/systolic_array_2x2.v
+read_verilog -sv rtl/relu.v
+read_verilog -sv rtl/requantize_int8.v
+read_verilog -sv rtl/ai_accelerator_top.v
+
+hierarchy -check -top ai_accelerator_top
+proc
+opt
+memory
+opt
+check
+tee -o build/synthesis_report.txt stat
+write_json build/ai_accelerator.json
