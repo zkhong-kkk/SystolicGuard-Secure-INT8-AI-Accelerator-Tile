@@ -8,20 +8,143 @@
 
 ![SystolicGuard Architecture](docs/architecture.svg)
 
+[技术路线](#技术路线) · [复现流程](#复现流程) · [实验结果](#实验结果) · [完整架构说明](docs/architecture.md)
+
 ## 技术路线
 
-1. **低精度数据表示**：激活和权重采用 signed INT8，乘法结果扩展后使用 INT32 累加，兼顾推理效率与累加精度。
-2. **并行计算阵列**：构建 4 个 MAC PE 组成的 2×2 output-stationary 脉动阵列；激活值向右传播、权重向下传播，部分和固定保存在 PE 内。
-3. **量化后处理**：在矩阵乘法后依次执行按输出通道 Bias、ReLU/旁路、算术右移和 INT8 饱和，并保留双精度输出：
+### 1. 数据格式与计算目标
 
-   ```text
-   C32 = ReLU_or_bypass(A × W + bias)
-   C8  = saturate_INT8(ReLU_or_bypass((A × W + bias) >>> shift))
-   ```
+输入激活和权重采用 signed INT8，以降低存储、带宽和乘法器开销；单次乘法扩展为 signed INT16，部分和使用 signed INT32，避免多项累加过早溢出。计算目标为一个带按通道 Bias 和量化后处理的 2×2 矩阵乘法：
 
-4. **控制与性能计数**：使用 `IDLE → PREP → COMPUTE → ACTIVATE → DONE` 五状态控制器协调加载、计算和结果写回；单次任务需要 6 个内部周期，峰值吞吐为 4 MAC/周期。
-5. **轻量安全防护**：限制计算期间的配置写入，对激活、权重和 Bias 缓冲区执行奇偶校验，并支持故障锁存与安全清除。
-6. **软硬件协同验证**：通过 Verilog 测试平台覆盖基础计算、有符号数据、随机回归、量化边界和安全攻击场景；使用 Python/PyTorch 生成参考结果并进行 RTL 位精度对比，最后通过 Yosys 完成综合与资源统计。
+```text
+acc[i,j]    = Σ A[i,k] × W[k,j]
+biased[i,j] = acc[i,j] + bias[j]
+C32[i,j]    = ReLU_or_bypass(biased[i,j])
+C8[i,j]     = saturate_INT8(ReLU_or_bypass(biased[i,j] >>> shift))
+```
+
+`C32` 用于观察未经截断的完整结果，`C8` 可直接作为下一层量化推理的输入。实现入口见 [`rtl/ai_accelerator_top.v`](rtl/ai_accelerator_top.v)。
+
+### 2. PE 微结构
+
+每个 Processing Element 包含一个 8×8 有符号乘法器、一个 32 位累加器，以及激活/权重传递寄存器。使能有效时，PE 一边执行 `acc ← acc + A × W`，一边将 A 向右、W 向下传递；清零信号用于任务开始前复位流水线和部分和。具体实现见 [`rtl/mac_pe.v`](rtl/mac_pe.v)。
+
+### 3. 2×2 Output-Stationary 脉动阵列
+
+4 个 PE 组成 2×2 阵列，采用 output-stationary 数据流：每个输出元素的部分和始终保留在对应 PE 内，减少部分和在阵列中的搬运。第二行激活和第二列权重延迟一个周期注入，使配对数据在正确时钟到达同一个 PE。阵列连接见 [`rtl/systolic_array_2x2.v`](rtl/systolic_array_2x2.v)。
+
+| COMPUTE 周期 | row0 输入 | row1 输入 | col0 输入 | col1 输入 | 作用 |
+|---:|---:|---:|---:|---:|---|
+| 0 | A00 | 0 | W00 | 0 | 启动左上角 PE |
+| 1 | A01 | A10 | W10 | W01 | 主体数据进入阵列 |
+| 2 | 0 | A11 | 0 | W11 | 注入最后一组数据 |
+| 3 | 0 | 0 | 0 | 0 | 排空流水线 |
+
+### 4. 本地缓冲与配置通路
+
+顶层内置 4×INT8 激活缓冲、4×INT8 权重缓冲和 2×INT32 Bias 缓冲。软件通过 `cfg_we/cfg_sel/cfg_addr` 写入激活或权重，通过独立 Bias 端口写入两个输出通道的偏置；计算启动时锁存 `relu_enable` 和 `requant_shift`，保证任务执行期间配置稳定。接口和缓冲逻辑位于 [`rtl/ai_accelerator_top.v`](rtl/ai_accelerator_top.v)。
+
+### 5. 量化后处理链路
+
+阵列输出先加按输出列共享的 Bias，再经过可旁路 ReLU。INT32 路径保留完整激活结果；INT8 路径执行可配置算术右移，并将结果饱和到 `[-128, 127]`。ReLU 与重量化分别由 [`rtl/relu.v`](rtl/relu.v) 和 [`rtl/requantize_int8.v`](rtl/requantize_int8.v) 实现。
+
+### 6. 控制状态机与周期
+
+控制器采用 `IDLE → PREP → COMPUTE → ACTIVATE → DONE` 五状态流程：
+
+| 状态 | 周期数 | 主要操作 |
+|---|---:|---|
+| `IDLE` | — | 装载激活、权重、Bias 和量化参数 |
+| `PREP` | 1 | 清空 PE 流水寄存器与累加器 |
+| `COMPUTE` | 4 | 错位注入、并行 MAC 与流水排空 |
+| `ACTIVATE` | 1 | Bias、ReLU、重量化、饱和及结果写回 |
+| `DONE` | 1 个脉冲 | 通知外部结果可读并返回空闲态 |
+
+从 `PREP` 到结果写回共 6 个内部周期；4 个 PE 的峰值吞吐为 4 MAC/周期。状态机和 `cycle_count` 见 [`rtl/ai_accelerator_top.v`](rtl/ai_accelerator_top.v)。
+
+### 7. 轻量安全机制
+
+计算期间的配置写入会被阻止并记录 `FAULT_ILLEGAL_WRITE`；激活、权重和 Bias 写入时同步保存奇偶校验，启动前若检测到内容被篡改则记录 `FAULT_INTEGRITY` 并拒绝执行；`secure_clear` 可清空缓冲、输出、流水线和故障状态。机制边界见 [`docs/security.md`](docs/security.md)，实现仍位于 [`rtl/ai_accelerator_top.v`](rtl/ai_accelerator_top.v)。
+
+### 8. 软硬件验证闭环
+
+[`scripts/golden_model.py`](scripts/golden_model.py) 提供纯 Python 参考模型和 1000 组随机范围检查；[`software/architecture_adapter.py`](software/architecture_adapter.py) 使用 PyTorch CPU/CUDA（未安装 PyTorch 时回退纯 Python）生成位精确参考结果与 RTL 输入向量；[`tb/adapter_tb.v`](tb/adapter_tb.v) 读取向量并比较 RTL 输出；[`tb/ai_accelerator_tb.v`](tb/ai_accelerator_tb.v) 覆盖定向、随机、饱和和安全测试；最后由 [`scripts/synth_yosys.ys`](scripts/synth_yosys.ys) 完成层次检查、通用逻辑综合和资源统计。
+
+## 复现流程
+
+### 1. 获取项目
+
+```bash
+git clone https://github.com/zkhong-kkk/AI-circuits.git
+cd AI-circuits
+```
+
+准备 Python 3、Icarus Verilog（`iverilog`/`vvp`）和 Yosys，并确保它们已加入 `PATH`。PyTorch 为可选依赖；没有 PyTorch 时，适配器会自动使用纯 Python CPU 参考模型。
+
+### 2. 运行软件黄金模型
+
+点击查看 [`scripts/golden_model.py`](scripts/golden_model.py)，然后执行：
+
+```bash
+python scripts/golden_model.py
+```
+
+预期输出：`PASS golden model: directed case + 1000 randomized cases`。
+
+### 3. 运行完整 RTL 回归
+
+测试入口为 [`tb/ai_accelerator_tb.v`](tb/ai_accelerator_tb.v)。根据系统选择一键脚本：
+
+- Windows PowerShell：[`scripts/run_sim.ps1`](scripts/run_sim.ps1)
+- Linux/macOS/WSL：[`scripts/run_sim.sh`](scripts/run_sim.sh)
+
+```powershell
+# Windows
+.\scripts\run_sim.ps1
+```
+
+```bash
+# Linux/macOS/WSL
+bash scripts/run_sim.sh
+```
+
+终端应显示 `ALL TESTS PASSED`，并在本地生成 `build/ai_accelerator.vcd` 波形文件。
+
+### 4. 复现算法到 RTL 的位精度对比
+
+向量生成器为 [`software/architecture_adapter.py`](software/architecture_adapter.py)，RTL 文件驱动测试台为 [`tb/adapter_tb.v`](tb/adapter_tb.v)。一键脚本：
+
+- Windows PowerShell：[`scripts/run_adapter.ps1`](scripts/run_adapter.ps1)
+- Linux/macOS/WSL：[`scripts/run_adapter.sh`](scripts/run_adapter.sh)
+
+```powershell
+# 默认示例
+.\scripts\run_adapter.ps1
+
+# 自定义输入
+.\scripts\run_adapter.ps1 --a "1,-2,-3,4" --b "5,6,-7,8" --bias "0,0" --shift 0 --no-relu
+```
+
+脚本会生成 `build/adapter_vectors.hex` 与 `build/adapter.vcd`，并逐项检查 C32/C8 是否与软件参考结果一致。仓库内的示例截图可直接查看：[`docs/adapter_waveform.png`](docs/adapter_waveform.png)。
+
+### 5. 运行 Yosys 综合
+
+综合流程定义在 [`scripts/synth_yosys.ys`](scripts/synth_yosys.ys)，根据系统选择：
+
+- Windows PowerShell：[`scripts/run_synth.ps1`](scripts/run_synth.ps1)
+- Linux/macOS/WSL：[`scripts/run_synth.sh`](scripts/run_synth.sh)
+
+```powershell
+# Windows
+.\scripts\run_synth.ps1
+```
+
+```bash
+# Linux/macOS/WSL
+bash scripts/run_synth.sh
+```
+
+完成后会在本地生成 `build/synthesis_report.txt` 和 `build/ai_accelerator.json`。综合后的模块对应关系与性能分析可继续阅读 [`docs/architecture.md`](docs/architecture.md)，设计取舍见 [`docs/design.md`](docs/design.md)。
 
 ## 实验结果
 
