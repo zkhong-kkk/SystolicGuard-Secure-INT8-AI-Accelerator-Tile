@@ -8,7 +8,7 @@
     </style>
   </defs>
   <rect width="1200" height="720" fill="#f8fafc"/>
-  <text x="600" y="42" text-anchor="middle" class="title">Secure INT8 AI Accelerator Tile Architecture</text>
+  <text x="600" y="42" text-anchor="middle" class="title">SystolicGuard Architecture</text>
 
   <rect x="55" y="80" width="310" height="105" class="box" fill="#dbeafe"/>
   <text x="210" y="113" text-anchor="middle" class="h">Controller / CSR</text>
