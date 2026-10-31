@@ -75,8 +75,8 @@ C8[i,j]     = saturate_INT8(ReLU_or_bypass(biased[i,j] >>> shift))
 ### 1. 获取项目
 
 ```bash
-git clone https://github.com/zkhong-kkk/AI-circuits.git
-cd AI-circuits
+git clone https://github.com/zkhong-kkk/SystolicGuard-Secure-INT8-AI-Accelerator-Tile.git
+cd SystolicGuard-Secure-INT8-AI-Accelerator-Tile
 ```
 
 准备 Python 3、Icarus Verilog（`iverilog`/`vvp`）和 Yosys，并确保它们已加入 `PATH`。PyTorch 为可选依赖；没有 PyTorch 时，适配器会自动使用纯 Python CPU 参考模型。
